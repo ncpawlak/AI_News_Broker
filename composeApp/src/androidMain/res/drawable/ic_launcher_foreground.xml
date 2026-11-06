@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Newspaper glyph with a spark, centred in the 108dp adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,36h30a4,4 0,0 1,4 4v28a4,4 0,0 1,-4 4H40a4,4 0,0 1,-4 -4z" />
+    <path
+        android:fillColor="#3F51B5"
+        android:pathData="M41,42h20v4H41zM41,50h20v3H41zM41,57h14v3H41zM41,64h17v3H41z" />
+    <path
+        android:fillColor="#FFD54F"
+        android:pathData="M74,30l2.2,5.3L81.5,37.5l-5.3,2.2L74,45l-2.2,-5.3L66.5,37.5l5.3,-2.2z" />
+</vector>
