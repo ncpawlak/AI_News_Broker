@@ -48,7 +48,7 @@ actual fun createHttpClient(): HttpClient = HttpClient(OkHttp) {
     }
 }
 
-actual val newsBaseUrl: String = "https://www.bing.com"
+actual fun platformUrl(url: String): String = url
 
 actual val supportsBackgroundRefresh: Boolean = true
 

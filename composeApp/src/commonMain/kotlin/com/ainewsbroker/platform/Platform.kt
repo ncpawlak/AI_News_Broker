@@ -12,8 +12,8 @@ expect fun createKeyValueStore(): KeyValueStore
 
 expect fun createHttpClient(): HttpClient
 
-/** Base URL for Google News; the web build goes through the dev-server proxy. */
-expect val newsBaseUrl: String
+/** Rewrites an absolute https URL for this platform; the web build routes it through the dev-server proxy. */
+expect fun platformUrl(url: String): String
 
 /** Schedules OS-level background refresh where supported (WorkManager on Android). */
 expect fun scheduleBackgroundRefresh(hours: Int)

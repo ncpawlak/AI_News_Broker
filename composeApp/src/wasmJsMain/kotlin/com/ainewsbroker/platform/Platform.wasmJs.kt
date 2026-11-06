@@ -21,8 +21,9 @@ actual fun createHttpClient(): HttpClient = HttpClient(Js) {
     install(HttpTimeout) { requestTimeoutMillis = 20_000 }
 }
 
-// Relative path served by the webpack dev-server proxy (see webpack.config.d/proxy.js).
-actual val newsBaseUrl: String = "/bing"
+// Same-origin path served by the webpack dev-server proxy (see webpack.config.d/proxy.js),
+// e.g. https://www.bing.com/news/search?... -> /proxy/www.bing.com/news/search?...
+actual fun platformUrl(url: String): String = "/proxy/" + url.removePrefix("https://")
 
 actual val supportsBackgroundRefresh: Boolean = false
 

@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,14 +19,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ainewsbroker.data.QueryNormalizer
 import com.ainewsbroker.model.Category
+import com.ainewsbroker.model.QuerySource
 import com.ainewsbroker.model.RefreshIntervalOptions
 import com.ainewsbroker.model.SearchQuery
 import com.ainewsbroker.model.ThemeMode
@@ -213,6 +219,12 @@ private fun QueryRow(query: SearchQuery, onToggle: (Boolean) -> Unit, onEdit: ()
     ) {
         Column(Modifier.weight(1f)) {
             Text(query.label, style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                query.source.displayName + if (query.minPoints > 0 && query.source != QuerySource.BingNews && query.source != QuerySource.Feed) " · ${query.minPoints}+ points" else "",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
             Spacer(Modifier.height(4.dp))
             Text(
                 query.rawQuery,
@@ -240,22 +252,24 @@ private fun QueryEditorDialog(
     var label by remember { mutableStateOf(initial.label) }
     var raw by remember { mutableStateOf(initial.rawQuery) }
     var categoryId by remember { mutableStateOf(initial.categoryId) }
-    val valid = label.isNotBlank() && raw.isNotBlank()
+    var source by remember { mutableStateOf(initial.source) }
+    var minPointsText by remember { mutableStateOf(initial.minPoints.toString()) }
+    val isHn = source == QuerySource.HackerNews || source == QuerySource.ShowHN
+    val minPoints = minPointsText.toIntOrNull()
+    val valid = label.isNotBlank() && raw.isNotBlank() &&
+        (source != QuerySource.Feed || raw.trim().startsWith("https://")) &&
+        (!isHn || (minPoints != null && minPoints >= 0))
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isNew) "New search" else "Edit search") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    categories.forEachIndexed { i, c ->
-                        SegmentedButton(
-                            selected = categoryId == c.id,
-                            onClick = { categoryId = c.id },
-                            shape = SegmentedButtonDefaults.itemShape(i, categories.size),
-                        ) { Text(c.name, maxLines = 1) }
-                    }
-                }
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ChipGroup("Category", categories.map { it.id to it.name }, categoryId) { categoryId = it }
+                ChipGroup("Source", QuerySource.entries.map { it to it.displayName }, source) { source = it }
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
@@ -266,14 +280,38 @@ private fun QueryEditorDialog(
                 OutlinedTextField(
                     value = raw,
                     onValueChange = { raw = it },
-                    label = { Text("Search query") },
-                    supportingText = { Text("Google Alerts syntax: \"quotes\", OR, AND, (groups)") },
-                    minLines = 3,
+                    label = { Text(if (source == QuerySource.Feed) "Feed URL" else "Search query") },
+                    supportingText = {
+                        Text(
+                            when (source) {
+                                QuerySource.BingNews -> "Google Alerts syntax: \"quotes\", OR, AND, (groups). Short phrases work best."
+                                QuerySource.HackerNews, QuerySource.ShowHN -> "Title terms separated by OR, e.g. Claude Code OR MCP"
+                                QuerySource.Feed -> "An https:// RSS or Atom feed, e.g. a changelog or GitHub releases.atom"
+                            },
+                        )
+                    },
+                    minLines = if (source == QuerySource.Feed) 1 else 3,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (isHn) {
+                    OutlinedTextField(
+                        value = minPointsText,
+                        onValueChange = { minPointsText = it.filter(Char::isDigit).take(5) },
+                        label = { Text("Minimum points") },
+                        supportingText = { Text("Higher = only popular posts") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 if (raw.isNotBlank()) {
                     Text(
-                        "Searched on Bing News (past week): ${QueryNormalizer.normalize(raw)}",
+                        when (source) {
+                            QuerySource.BingNews -> "Searched on Bing News (past week): ${QueryNormalizer.normalize(raw)}"
+                            QuerySource.HackerNews, QuerySource.ShowHN ->
+                                "${source.displayName} titles (past week) matching any of: " +
+                                    QueryNormalizer.hackerNewsTerms(raw).joinToString(" · ")
+                            QuerySource.Feed -> "Reads every entry from this feed."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -290,9 +328,33 @@ private fun QueryEditorDialog(
         confirmButton = {
             TextButton(
                 enabled = valid,
-                onClick = { onSave(initial.copy(label = label.trim(), rawQuery = raw.trim(), categoryId = categoryId)) },
+                onClick = {
+                    onSave(
+                        initial.copy(
+                            label = label.trim(),
+                            rawQuery = raw.trim(),
+                            categoryId = categoryId,
+                            source = source,
+                            minPoints = if (isHn) minPoints ?: 0 else initial.minPoints,
+                        ),
+                    )
+                },
             ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun <T> ChipGroup(title: String, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
+    Column {
+        Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { (value, name) ->
+                FilterChip(selected = value == selected, onClick = { onSelect(value) }, label = { Text(name, maxLines = 1) })
+            }
+        }
+    }
 }

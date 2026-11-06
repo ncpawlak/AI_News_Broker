@@ -12,7 +12,8 @@ fun categoryAccent(categoryId: String): Color {
     return when (categoryId) {
         DefaultQueries.CLAUDE -> if (dark) Color(0xFFFFB68F) else Color(0xFFB4501A)
         DefaultQueries.COPILOT -> if (dark) Color(0xFFB9C3FF) else Color(0xFF3949AB)
-        DefaultQueries.PARADIGMS -> if (dark) Color(0xFF7DD8C8) else Color(0xFF00796B)
+        DefaultQueries.WORKFLOWS -> if (dark) Color(0xFF7DD8C8) else Color(0xFF00796B)
+        DefaultQueries.TOOLS -> if (dark) Color(0xFFE7B5F5) else Color(0xFF8E24AA)
         else -> MaterialTheme.colorScheme.primary
     }
 }

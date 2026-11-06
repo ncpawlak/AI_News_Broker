@@ -2,6 +2,7 @@ package com.ainewsbroker.data
 
 import com.ainewsbroker.model.AppSettings
 import com.ainewsbroker.model.Article
+import com.ainewsbroker.model.QuerySource
 import com.ainewsbroker.model.SearchQuery
 import com.ainewsbroker.platform.KeyValueStore
 import io.ktor.client.HttpClient
@@ -31,20 +32,22 @@ data class RefreshResult(val newArticles: Int, val failedQueries: Int, val total
 class NewsRepository(
     private val store: KeyValueStore,
     private val client: HttpClient,
-    private val baseUrl: String,
+    /** Rewrites absolute source URLs; the web build routes them through the dev-server proxy. */
+    private val rewriteUrl: (String) -> String = { it },
     private val now: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val refreshLock = Mutex()
 
-    private val _queries = MutableStateFlow(
-        load(KEY_QUERIES, ListSerializer(SearchQuery.serializer())) ?: DefaultQueries.queries,
-    )
+    private val _queries = MutableStateFlow(loadQueries())
     val queries: StateFlow<List<SearchQuery>> = _queries.asStateFlow()
 
     private val _articles = MutableStateFlow(
-        // Drop articles cached from the old Google News source; they have redirect links and no summaries.
-        load(KEY_ARTICLES, ListSerializer(Article.serializer()))?.filterNot { it.link.contains("news.google.com") } ?: emptyList(),
+        load(KEY_ARTICLES, ListSerializer(Article.serializer()))
+            // Drop articles cached from the old Google News source and from retired default searches.
+            ?.filterNot { it.link.contains("news.google.com") }
+            ?.filter { a -> _queries.value.any { it.id == a.queryId } }
+            ?: emptyList(),
     )
     val articles: StateFlow<List<Article>> = _articles.asStateFlow()
 
@@ -86,13 +89,17 @@ class NewsRepository(
     }
 
     private suspend fun fetch(query: SearchQuery, fetchedAt: Long): List<Article> {
-        val response = client.get(QueryNormalizer.buildSearchUrl(baseUrl, query.rawQuery))
-        check(response.status.isSuccess()) { "HTTP ${response.status.value} for ${query.label}" }
-        return RssParser.parse(response.bodyAsText()).map { item ->
+        val items = when (query.source) {
+            QuerySource.BingNews -> RssParser.parse(get(QueryNormalizer.buildSearchUrl(QueryNormalizer.BING_BASE, query.rawQuery), query))
+            QuerySource.Feed -> RssParser.parse(get(query.rawQuery.trim(), query), query.titlePrefix)
+            QuerySource.HackerNews, QuerySource.ShowHN -> fetchHackerNews(query, fetchedAt)
+        }
+        val feedSource = if (query.source == QuerySource.Feed) feedSourceName(query.rawQuery) else null
+        return items.map { item ->
             Article(
                 id = stableId(item.link),
                 title = item.title,
-                source = item.source ?: "Unknown source",
+                source = item.source ?: feedSource ?: "Unknown source",
                 link = item.link,
                 publishedAtMillis = item.publishedAtMillis ?: fetchedAt,
                 categoryId = query.categoryId,
@@ -102,6 +109,50 @@ class NewsRepository(
                 summary = item.summary,
             )
         }
+    }
+
+    private suspend fun fetchHackerNews(query: SearchQuery, fetchedAt: Long): List<RssItem> {
+        val since = (fetchedAt - HN_WINDOW_MILLIS) / 1000
+        val terms = QueryNormalizer.hackerNewsTerms(query.rawQuery).take(MAX_HN_TERMS)
+        check(terms.isNotEmpty()) { "No search terms for ${query.label}" }
+        val results = coroutineScope {
+            terms.map { term ->
+                async {
+                    runCatching {
+                        val url = QueryNormalizer.buildHackerNewsUrl(term, query.source == QuerySource.ShowHN, query.minPoints, since)
+                        HackerNewsParser.parse(get(url, query))
+                    }
+                }
+            }.awaitAll()
+        }
+        if (results.all { it.isFailure }) throw results.first().exceptionOrNull()!!
+        return results.mapNotNull { it.getOrNull() }.flatten().distinctBy { it.link }
+    }
+
+    private suspend fun get(url: String, query: SearchQuery): String {
+        check(url.startsWith("https://")) { "${query.label}: only https:// URLs are supported" }
+        val response = client.get(rewriteUrl(url))
+        check(response.status.isSuccess()) { "HTTP ${response.status.value} for ${query.label}" }
+        return response.bodyAsText()
+    }
+
+    private fun loadQueries(): List<SearchQuery> {
+        val stored = load(KEY_QUERIES, ListSerializer(SearchQuery.serializer()))
+        val version = store.get(KEY_QUERIES_VERSION)?.toIntOrNull() ?: 1
+        if (stored == null || version >= DefaultQueries.VERSION) {
+            store.put(KEY_QUERIES_VERSION, DefaultQueries.VERSION.toString())
+            return stored ?: DefaultQueries.queries
+        }
+        // Older install: adopt the new defaults but keep the user's own searches.
+        val validCategories = DefaultQueries.categories.map { it.id }.toSet()
+        val custom = stored.filter { it.id.startsWith(CUSTOM_PREFIX) }.map {
+            if (it.categoryId in validCategories) it else it.copy(categoryId = DefaultQueries.WORKFLOWS)
+        }
+        val migrated = DefaultQueries.queries + custom
+        save(KEY_QUERIES, ListSerializer(SearchQuery.serializer()), migrated)
+        store.put(KEY_QUERIES_VERSION, DefaultQueries.VERSION.toString())
+        store.put(KEY_LAST_REFRESH, "") // Forces a refresh on launch so the new searches populate the feed.
+        return migrated
     }
 
     private fun merge(existing: List<Article>, fetched: List<Article>, nowMillis: Long): List<Article> {
@@ -157,7 +208,7 @@ class NewsRepository(
         save(KEY_SETTINGS, AppSettings.serializer(), _settings.value)
     }
 
-    fun newQueryId(): String = "custom-${now()}"
+    fun newQueryId(): String = "$CUSTOM_PREFIX${now()}"
 
     private fun persistQueriesAndArticles() {
         save(KEY_QUERIES, ListSerializer(SearchQuery.serializer()), _queries.value)
@@ -172,13 +223,26 @@ class NewsRepository(
 
     companion object {
         private const val KEY_QUERIES = "queries"
+        private const val KEY_QUERIES_VERSION = "queries_version"
         private const val KEY_ARTICLES = "articles"
         private const val KEY_READ = "read_ids"
         private const val KEY_SETTINGS = "settings"
         private const val KEY_LAST_REFRESH = "last_refresh"
+        private const val CUSTOM_PREFIX = "custom-"
         private const val MAX_PARALLEL_REQUESTS = 3
+        private const val MAX_HN_TERMS = 8
         private const val MAX_ARTICLES = 600
         private const val RETENTION_MILLIS = 30L * 24 * 60 * 60 * 1000
+        private const val HN_WINDOW_MILLIS = 7L * 24 * 60 * 60 * 1000
+        private val hostRegex = Regex("""^https?://(?:www\.)?([^/:?#]+)""")
+
+        /** Friendly publisher name for feed sources that don't name themselves per item. */
+        fun feedSourceName(feedUrl: String): String = when (val host = hostRegex.find(feedUrl.trim())?.groupValues?.get(1)) {
+            "github.blog" -> "GitHub Changelog"
+            "github.com" -> "GitHub Releases"
+            null -> "Feed"
+            else -> host
+        }
 
         /** FNV-1a 64-bit hash of the link: stable across platforms and app restarts. */
         fun stableId(link: String): String {

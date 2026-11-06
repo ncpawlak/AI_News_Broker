@@ -8,29 +8,60 @@ data class RssItem(
     val summary: String? = null,
 )
 
-/** Minimal parser for Bing News RSS. Regex-based so it runs identically on Android and Wasm. */
+/**
+ * Minimal parser for RSS 2.0 (Bing News, blog changelogs) and Atom (GitHub releases).
+ * Regex-based so it runs identically on Android and Wasm.
+ */
 object RssParser {
+    private const val MAX_SUMMARY_CHARS = 320
+
     private val itemRegex = Regex("""<item>([\s\S]*?)</item>""")
+    private val entryRegex = Regex("""<entry>([\s\S]*?)</entry>""")
+    private val atomLinkRegex = Regex("""<link\b[^>]*\bhref="([^"]+)"[^>]*/?>""")
     private val cdataRegex = Regex("""^<!\[CDATA\[([\s\S]*?)\]\]>$""")
     private val entityRegex = Regex("""&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos|nbsp);""")
+    private val listItemRegex = Regex("""<li\b[^>]*>""", RegexOption.IGNORE_CASE)
+    private val headingRegex = Regex("""<h[1-6]\b[^>]*>[\s\S]*?</h[1-6]>""", RegexOption.IGNORE_CASE)
     private val htmlTagRegex = Regex("""<[^>]+>""")
     private val whitespaceRegex = Regex("""\s+""")
     private val trailingEllipsisRegex = Regex("""\s*(\.\.\.|…)$""")
+    private val wordpressFooterRegex = Regex("""\s*The post .{0,300}? appeared first on .{0,100}$""")
     private val bingUrlParam = Regex("""[?&]url=([^&]+)""")
+    private val versionTitleRegex = Regex("""^v?\d+(\.\d+)+\S*$""")
 
-    fun parse(xml: String): List<RssItem> = itemRegex.findAll(xml).mapNotNull { match ->
-        val block = match.groupValues[1]
-        val rawTitle = tag(block, "title") ?: return@mapNotNull null
-        val link = tag(block, "link") ?: return@mapNotNull null
+    /** Parses RSS `<item>`s, or Atom `<entry>`s if the document has no items. */
+    fun parse(xml: String, titlePrefix: String? = null): List<RssItem> {
+        val rss = itemRegex.findAll(xml).mapNotNull { parseRssItem(it.groupValues[1]) }.toList()
+        val items = rss.ifEmpty { entryRegex.findAll(xml).mapNotNull { parseAtomEntry(it.groupValues[1]) }.toList() }
+        if (titlePrefix.isNullOrBlank()) return items
+        return items.map { if (versionTitleRegex.matches(it.title)) it.copy(title = "$titlePrefix ${it.title}") else it }
+    }
+
+    private fun parseRssItem(block: String): RssItem? {
+        val rawTitle = tag(block, "title") ?: return null
+        val link = tag(block, "link") ?: return null
         val source = tag(block, "News:Source") ?: tag(block, "source")
-        RssItem(
+        return RssItem(
             title = stripSourceSuffix(rawTitle, source),
             link = publisherUrl(link),
             publishedAtMillis = tag(block, "pubDate")?.let(DateParser::parseRfc822),
             source = source,
             summary = tag(block, "description")?.let(::cleanSummary),
         )
-    }.toList()
+    }
+
+    private fun parseAtomEntry(block: String): RssItem? {
+        val title = tag(block, "title") ?: return null
+        val link = atomLinkRegex.find(block)?.groupValues?.get(1)?.let(::decodeEntities) ?: return null
+        val date = tag(block, "updated") ?: tag(block, "published")
+        return RssItem(
+            title = title,
+            link = link,
+            publishedAtMillis = date?.let(DateParser::parseIso8601),
+            source = null,
+            summary = (tag(block, "content") ?: tag(block, "summary"))?.let(::cleanSummary),
+        )
+    }
 
     /** Bing wraps links in an apiclick redirect; the real article URL is in its `url` parameter. */
     fun publisherUrl(link: String): String {
@@ -40,9 +71,16 @@ object RssParser {
         return if (decoded.startsWith("http://") || decoded.startsWith("https://")) decoded else link
     }
 
-    private fun cleanSummary(text: String): String? {
-        val plain = decodeEntities(text.replace(htmlTagRegex, " ")).replace(whitespaceRegex, " ").trim()
+    /** Turns HTML/plain text into a short single-paragraph summary; release-note bullets become "•". */
+    fun cleanSummary(text: String): String? {
+        val html = text.replace(headingRegex, " ").replace(listItemRegex, " • ")
+        var plain = decodeEntities(html.replace(htmlTagRegex, " ")).replace(whitespaceRegex, " ").trim()
+        plain = plain.replace(wordpressFooterRegex, "").removePrefix("•").trim()
         if (plain.length < 20) return null
+        if (plain.length > MAX_SUMMARY_CHARS) {
+            val cut = plain.take(MAX_SUMMARY_CHARS)
+            plain = cut.substring(0, cut.lastIndexOf(' ').takeIf { it > MAX_SUMMARY_CHARS / 2 } ?: cut.length).trimEnd(' ', ',', '•') + "…"
+        }
         return plain.replace(trailingEllipsisRegex, "…")
     }
 
@@ -115,6 +153,22 @@ object DateParser {
         var seconds = days * 86_400L + h.toInt() * 3600L + min.toInt() * 60L + sec
         val zone = m.groupValues[7]
         if (zone.length == 5 && (zone[0] == '+' || zone[0] == '-')) {
+            val offset = zone.substring(1, 3).toInt() * 3600 + zone.substring(3, 5).toInt() * 60
+            seconds -= if (zone[0] == '+') offset else -offset
+        }
+        return seconds * 1000
+    }
+
+    private val iso8601 = Regex("""(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?""")
+
+    /** Parses e.g. "2026-11-06T17:04:01Z" or "2026-11-06T12:04:01-05:00" into epoch millis (UTC). */
+    fun parseIso8601(text: String): Long? {
+        val m = iso8601.find(text) ?: return null
+        val (y, mo, d, h, min) = m.destructured
+        val sec = m.groupValues[6].ifEmpty { "0" }.toInt()
+        var seconds = daysFromCivil(y.toInt(), mo.toInt(), d.toInt()) * 86_400L + h.toInt() * 3600L + min.toInt() * 60L + sec
+        val zone = m.groupValues[7].replace(":", "")
+        if (zone.length == 5) {
             val offset = zone.substring(1, 3).toInt() * 3600 + zone.substring(3, 5).toInt() * 60
             seconds -= if (zone[0] == '+') offset else -offset
         }
