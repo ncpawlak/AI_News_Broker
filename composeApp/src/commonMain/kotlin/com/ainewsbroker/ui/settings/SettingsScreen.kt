@@ -273,7 +273,7 @@ private fun QueryEditorDialog(
                 )
                 if (raw.isNotBlank()) {
                     Text(
-                        "Sent to Google News as: ${QueryNormalizer.normalize(raw)}",
+                        "Searched on Bing News (past week): ${QueryNormalizer.normalize(raw)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

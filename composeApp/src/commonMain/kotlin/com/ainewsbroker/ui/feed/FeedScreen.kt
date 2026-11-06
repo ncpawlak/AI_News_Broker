@@ -67,8 +67,6 @@ import com.ainewsbroker.ui.theme.categoryAccent
 import kotlinx.coroutines.delay
 import kotlin.time.Clock
 
-private val MaxContentWidth = 1240.dp
-
 @Composable
 fun FeedScreen(viewModel: FeedViewModel, onOpenSettings: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -165,7 +163,7 @@ fun FeedScreen(viewModel: FeedViewModel, onOpenSettings: () -> Unit) {
 private fun CategoryChips(state: FeedUiState, onSelect: (String?) -> Unit) {
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         LazyRow(
-            modifier = Modifier.widthIn(max = MaxContentWidth).fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -203,8 +201,8 @@ private fun ArticleGrid(articles: List<Article>, state: FeedUiState, now: Long, 
     val grouped = remember(articles, now / 3_600_000) { articles.groupBy { dayBucket(it.publishedAtMillis, now) } }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyVerticalStaggeredGrid(
-            columns = StaggeredGridCells.Adaptive(minSize = 340.dp),
-            modifier = Modifier.widthIn(max = MaxContentWidth).fillMaxSize(),
+            columns = StaggeredGridCells.Fixed(1),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 32.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalItemSpacing = 14.dp,
@@ -249,8 +247,8 @@ private fun ArticleGrid(articles: List<Article>, state: FeedUiState, now: Long, 
 private fun SkeletonList() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyVerticalStaggeredGrid(
-            columns = StaggeredGridCells.Adaptive(minSize = 340.dp),
-            modifier = Modifier.widthIn(max = MaxContentWidth).fillMaxSize(),
+            columns = StaggeredGridCells.Fixed(1),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalItemSpacing = 14.dp,

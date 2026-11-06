@@ -43,7 +43,8 @@ class NewsRepository(
     val queries: StateFlow<List<SearchQuery>> = _queries.asStateFlow()
 
     private val _articles = MutableStateFlow(
-        load(KEY_ARTICLES, ListSerializer(Article.serializer())) ?: emptyList(),
+        // Drop articles cached from the old Google News source; they have redirect links and no summaries.
+        load(KEY_ARTICLES, ListSerializer(Article.serializer()))?.filterNot { it.link.contains("news.google.com") } ?: emptyList(),
     )
     val articles: StateFlow<List<Article>> = _articles.asStateFlow()
 
@@ -98,6 +99,7 @@ class NewsRepository(
                 queryId = query.id,
                 queryLabel = query.label,
                 fetchedAtMillis = fetchedAt,
+                summary = item.summary,
             )
         }
     }

@@ -94,9 +94,19 @@ fun ArticleCard(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = if (isRead) FontWeight.Medium else FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 4,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
+            article.summary?.let { summary ->
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Tag(categoryName, accent, filled = true)

@@ -28,6 +28,7 @@ data class Article(
     val queryId: String,
     val queryLabel: String,
     val fetchedAtMillis: Long,
+    val summary: String? = null,
 )
 
 @Serializable

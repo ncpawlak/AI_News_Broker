@@ -5,26 +5,63 @@ data class RssItem(
     val link: String,
     val publishedAtMillis: Long?,
     val source: String?,
+    val summary: String? = null,
 )
 
-/** Minimal parser for Google News RSS. Regex-based so it runs identically on Android and Wasm. */
+/** Minimal parser for Bing News RSS. Regex-based so it runs identically on Android and Wasm. */
 object RssParser {
     private val itemRegex = Regex("""<item>([\s\S]*?)</item>""")
     private val cdataRegex = Regex("""^<!\[CDATA\[([\s\S]*?)\]\]>$""")
     private val entityRegex = Regex("""&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos|nbsp);""")
+    private val htmlTagRegex = Regex("""<[^>]+>""")
+    private val whitespaceRegex = Regex("""\s+""")
+    private val trailingEllipsisRegex = Regex("""\s*(\.\.\.|…)$""")
+    private val bingUrlParam = Regex("""[?&]url=([^&]+)""")
 
     fun parse(xml: String): List<RssItem> = itemRegex.findAll(xml).mapNotNull { match ->
         val block = match.groupValues[1]
         val rawTitle = tag(block, "title") ?: return@mapNotNull null
         val link = tag(block, "link") ?: return@mapNotNull null
-        val source = tag(block, "source")
+        val source = tag(block, "News:Source") ?: tag(block, "source")
         RssItem(
             title = stripSourceSuffix(rawTitle, source),
-            link = link,
+            link = publisherUrl(link),
             publishedAtMillis = tag(block, "pubDate")?.let(DateParser::parseRfc822),
             source = source,
+            summary = tag(block, "description")?.let(::cleanSummary),
         )
     }.toList()
+
+    /** Bing wraps links in an apiclick redirect; the real article URL is in its `url` parameter. */
+    fun publisherUrl(link: String): String {
+        if (!link.contains("bing.com/news/apiclick")) return link
+        val encoded = bingUrlParam.find(link)?.groupValues?.get(1) ?: return link
+        val decoded = percentDecode(encoded)
+        return if (decoded.startsWith("http://") || decoded.startsWith("https://")) decoded else link
+    }
+
+    private fun cleanSummary(text: String): String? {
+        val plain = decodeEntities(text.replace(htmlTagRegex, " ")).replace(whitespaceRegex, " ").trim()
+        if (plain.length < 20) return null
+        return plain.replace(trailingEllipsisRegex, "…")
+    }
+
+    private fun percentDecode(s: String): String {
+        val bytes = ArrayList<Byte>(s.length)
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            if (c == '%' && i + 2 < s.length) {
+                val v = s.substring(i + 1, i + 3).toIntOrNull(16)
+                if (v != null) {
+                    bytes.add(v.toByte()); i += 3; continue
+                }
+            }
+            if (c == '+') bytes.add(' '.code.toByte()) else c.toString().encodeToByteArray().forEach(bytes::add)
+            i++
+        }
+        return bytes.toByteArray().decodeToString()
+    }
 
     private fun tag(block: String, name: String): String? {
         val m = Regex("""<$name(?:\s[^>]*)?>([\s\S]*?)</$name>""").find(block) ?: return null

@@ -43,11 +43,12 @@ actual fun createHttpClient(): HttpClient = HttpClient(OkHttp) {
         connectTimeoutMillis = 10_000
     }
     defaultRequest {
-        headers.append(HttpHeaders.UserAgent, "Mozilla/5.0 (Linux; Android) AINewsBroker/0.1")
+        // Bing returns HTML instead of RSS for mobile/Android User-Agents.
+        headers.append(HttpHeaders.UserAgent, "Mozilla/5.0 (compatible; AINewsBroker/0.1)")
     }
 }
 
-actual val newsBaseUrl: String = "https://news.google.com"
+actual val newsBaseUrl: String = "https://www.bing.com"
 
 actual val supportsBackgroundRefresh: Boolean = true
 

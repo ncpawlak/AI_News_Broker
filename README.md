@@ -1,13 +1,13 @@
 # AI News Broker
 
-A fluid, readable Android news feed for staying current on **Claude**, **GitHub Copilot**, and new **AI engineering paradigms**. Articles come from Google News RSS searches built from Google-Alerts-style queries. Tap a headline to read the full article.
+A fluid, readable Android news feed for staying current on **Claude**, **GitHub Copilot**, and new **AI engineering paradigms**. Articles come from Bing News RSS searches built from Google-Alerts-style queries, each with the publisher's summary. Tap a card to open the full article on the publisher's site.
 
 Built with Kotlin Multiplatform + Compose Multiplatform, so the same UI runs on Android and in a web browser (WebAssembly) for quick previews.
 
 ## Features
 
 - Category chips (All / Claude / Copilot / Paradigms) with live counts
-- Cards grouped by day (Today, Yesterday, This week, Earlier), with source, relative time, and unread markers
+- Full-width, one-per-row cards with headline and summary, grouped by day (Today, Yesterday, This week, Earlier), with source, relative time, and unread markers
 - Articles open in Chrome Custom Tabs (Android) or a new tab (web)
 - Editable search queries in Settings (add, edit, toggle, delete, reset)
 - Light / Dark / System theme; Material You dynamic color on Android 12+
@@ -19,7 +19,7 @@ Built with Kotlin Multiplatform + Compose Multiplatform, so the same UI runs on 
 .\gradlew.bat :composeApp:wasmJsBrowserDevelopmentRun
 ```
 
-Open <http://localhost:8080>. The dev server proxies `/gnews` to `news.google.com` to get around CORS. That proxy only exists in the dev server, so a static web build cannot fetch news on its own.
+Open <http://localhost:8080>. The dev server proxies `/bing` to `www.bing.com` to get around CORS. That proxy only exists in the dev server, so a static web build cannot fetch news on its own.
 
 ## Run on Android
 
@@ -40,7 +40,7 @@ CI also uploads the debug APK as a build artifact.
 
 ## Default searches
 
-Seeded from `composeApp/src/commonMain/kotlin/com/ainewsbroker/data/DefaultQueries.kt`. Queries are written Google-Alerts style (`"Claude" AND ("API" OR ...)`) and converted for Google News (the `AND`s are dropped, and `when:7d` is appended).
+Seeded from `composeApp/src/commonMain/kotlin/com/ainewsbroker/data/DefaultQueries.kt`. Queries are written Google-Alerts style (`"Claude" AND ("API" OR ...)`), which Bing News accepts as-is. Results are limited to the past week.
 
 ## Project layout
 

@@ -22,7 +22,7 @@ actual fun createHttpClient(): HttpClient = HttpClient(Js) {
 }
 
 // Relative path served by the webpack dev-server proxy (see webpack.config.d/proxy.js).
-actual val newsBaseUrl: String = "/gnews"
+actual val newsBaseUrl: String = "/bing"
 
 actual val supportsBackgroundRefresh: Boolean = false
 
